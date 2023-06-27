@@ -1,11 +1,13 @@
 from concurrent.futures import ProcessPoolExecutor
+from tqdm import tqdm
 import pandas as pd
 import subprocess
 import os
 
 
-CHUNK = 10000
-DATA_DIR = None  # Name of folder to store raw data in
+CHUNK = 1000
+DATA_DIR = None 
+SYMBOL_DIR = None
 
 
 class ProcReader:
@@ -44,11 +46,11 @@ class Product:
             self._write()
 
     def _write(self):
-        df = pd.DataFrame(self.data, columns=[f'c{i}' for i in range(16)])
+        df = pd.DataFrame(self.data, columns=[f'c{i}' for i in range(1, 16)])
         symbol = self.data[0][5].split('_')[0]
         os.makedirs(f'{DATA_DIR}/{self.date}/{symbol}/', exist_ok=True)
         path = f'{DATA_DIR}/{self.date}/{symbol}/{self.product}.parquet.gzip'
-
+        
         if not os.path.isfile(path):
             df.to_parquet(path, index=None, engine='fastparquet', compression='gzip')
         else:
@@ -62,9 +64,8 @@ class SplitProducts:
         self._twxm = twxm
         self.products = {}
         self.date = date
-        with_trades = list(pd.read_csv(f'symbols/spx1/spx_{date}.csv')['symbol'])
-        self.with_trades = set([s.replace(' ', '') for s in with_trades])
-        self.temp = set()
+        with_trades = list(pd.read_csv(SYMBOL_DIR.format(date))['symbol'])
+        self.with_trades = set([s.replace('_', '').replace(' ', '') for s in with_trades])
 
     def _save_data(self, product: str, row: str):
         if product in self.products:
@@ -79,7 +80,6 @@ class SplitProducts:
         for twxm_byte in self._twxm:
             twxm = twxm_byte.decode('utf-8').split(' ')
             product = twxm[5].replace('_', '')
-            self.temp.add(product)
 
             if product in self.with_trades:
                 self._save_data(product, twxm)
@@ -100,10 +100,17 @@ class MPApply:
         self._date_range = date_range
 
     def apply(self, func, total_procs):
-        os.makedirs(f'{DATA_DIR}/')
-        with ProcessPoolExecutor(max_workers=total_procs) as executor:
-            for symbol in self._symbols:
-                executor.map(func, [symbol] * len(self._date_range), self._date_range)
+        os.makedirs(f'{DATA_DIR}/', exist_ok=True)
+        executor = ProcessPoolExecutor(max_workers=total_procs)
+        results = []
+        for symbol in self._symbols:
+            for date in self._date_range:
+                results.append(executor.submit(func, symbol, date))
+        
+        for res in tqdm(results):
+            print(res.result())
+            
+        executor.shutdown(wait=True)
 
 
 '''class Generator:
