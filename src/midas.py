@@ -1,13 +1,17 @@
 from concurrent.futures import ProcessPoolExecutor
+from typing import List, Tuple
+
 from tqdm import tqdm
 import pandas as pd
 import subprocess
 import os
 
+from .index import IndexGenerator
 
 CHUNK = 1000
 DATA_DIR = None 
 SYMBOL_DIR = None
+OUT_DIR = None
 
 
 class ProcReader:
@@ -94,56 +98,27 @@ def download(symbol, date):
     SplitProducts(twxm, date).execute()
 
 
+def index_worker(symbol, date, file_name):
+    df = pd.read_parquet(f'{DATA_DIR}/{date}/{symbol}/{file_name}')
+    params = {
+        'mode': 'a',
+        'index': False,
+        'float_format': '%.3f',
+        'header': False
+    }
+    generator = IndexGenerator(df)
+    generator.generate_tr().to_csv(f'{OUT_DIR}/{date}/tr_{symbol}.csv', **params)
+
+
 class MPApply:
-    def __init__(self, symbols, date_range):
-        self._symbols = symbols
-        self._date_range = date_range
+    def __init__(self, args: List[Tuple]):
+        self.args = args
 
     def apply(self, func, total_procs):
-        os.makedirs(f'{DATA_DIR}/', exist_ok=True)
         executor = ProcessPoolExecutor(max_workers=total_procs)
         results = []
-        for symbol in self._symbols:
-            for date in self._date_range:
-                results.append(executor.submit(func, symbol, date))
-        
+        for args in self.args:
+            results.append(executor.submit(func, *args))
         for res in tqdm(results):
             print(res.result())
-            
         executor.shutdown(wait=True)
-
-
-'''class Generator:
-    def __init__(self):
-        self._date_range = os.listdir(f'{DATA_DIR}/')
-
-    def _generate_tr(self, symbol, k, date):
-        v = pd.read_parquet(f'{DATA_DIR}/{date}/{symbol}/{k}')
-        params = {
-            'mode': 'a',
-            'index': False,
-            'float_format': '%.3f',
-            'header': False
-        }
-
-        if symbol in ('SPX', 'SPXW'):
-            generator = IndexGenerator(v, k)
-            generator.generate_tr().to_csv(f'{OUT_DIR}/{date}/tr_{symbol}.csv', **params)
-
-        else:
-            generator = EquityGenerator(v)
-            generator.generate_tr().to_csv(f'{OUT_DIR}/{date}/tr_{symbol}.csv', **params)
-
-    def __call__(self, total_procs):
-        pool = multiprocessing.Pool(total_procs)
-
-        for i, date in enumerate(self._date_range):
-            os.makedirs(f'{OUT_DIR}/{date}', exist_ok=True)
-            symbols = os.listdir(f'{DATA_DIR}/{date}/')
-
-            for s in symbols:
-                for k in os.listdir(f'{DATA_DIR}/{date}/{s}/'):
-                    pool.apply_async(self._generate_tr, args=[s, k, date])
-
-        pool.close()
-        pool.join()'''
