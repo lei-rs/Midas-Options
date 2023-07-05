@@ -8,7 +8,7 @@ import os
 
 from .index import IndexGenerator
 
-CHUNK = 1000
+CHUNK = 10000
 DATA_DIR = None 
 SYMBOL_DIR = None
 OUT_DIR = None
