@@ -1,7 +1,9 @@
 from concurrent.futures import ProcessPoolExecutor
 from typing import List, Tuple
 
+import fcntl
 from tqdm import tqdm
+from io import StringIO
 import pandas as pd
 import subprocess
 import os
@@ -75,7 +77,6 @@ class SplitProducts:
         if product in self.products:
             p = self.products[product]
             p.append(row)
-
         else:
             p = Product(product, row, self.date)
             self.products[product] = p
@@ -84,7 +85,7 @@ class SplitProducts:
         for twxm_byte in self._twxm:
             twxm = twxm_byte.decode('utf-8').split(' ')
             product = twxm[5].replace('_', '')
-
+            
             if product in self.with_trades:
                 self._save_data(product, twxm)
                 self.products[product].check()
@@ -97,17 +98,22 @@ def download(symbol, date):
     twxm = ProcReader(f'twxm {date} opra {symbol}_*')
     SplitProducts(twxm, date).execute()
 
-
+    
 def index_worker(symbol, date, file_name):
     df = pd.read_parquet(f'{DATA_DIR}/{date}/{symbol}/{file_name}')
     params = {
-        'mode': 'a',
         'index': False,
         'float_format': '%.3f',
         'header': False
     }
     generator = IndexGenerator(df)
-    generator.generate_tr().to_csv(f'{OUT_DIR}/{date}/tr_{symbol}.csv', **params)
+    csv_buffer = StringIO()
+    tr = generator.generate_tr()
+    
+    with open(f'{OUT_DIR}/{date}/tr_{symbol}.csv', 'a') as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        tr.to_csv(f, **params)
+        fcntl.flock(f, fcntl.LOCK_UN)
 
 
 class MPApply:
