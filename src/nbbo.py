@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 import numpy as np
 import polars as pl
 
@@ -56,3 +58,36 @@ def generate_nbbo(quotes: pl.DataFrame):
     ])
 
     return quotes.collect()
+
+
+def time_at_nbbo(quotes: pl.DataFrame):
+    quotes = quotes.with_columns(pl.date(1970, 1, 1).dt.combine(pl.col('c2')).alias('c2'))
+    rng = pl.date_range(
+        quotes.select(pl.first('c2').dt.truncate('1m')).item(),
+        quotes.select(pl.last('c2').dt.truncate('1m')).item() + timedelta(minutes=1),
+        '1m',
+        eager=True,
+    )[1:]
+    rng = rng.filter(~rng.is_in(quotes['c2']))
+    times = pl.DataFrame({'c2': rng})
+    quotes = pl.concat([quotes.lazy(), times.lazy()], how='diagonal').sort('c2')
+    quotes = quotes.select(pl.all().forward_fill())
+
+    frac_nbbo = quotes.select([
+        pl.col('c2').diff().shift(-1).dt.epoch().alias('diff'),
+        pl.col('c2').dt.truncate(timedelta(minutes=1)).alias('floor'),
+        pl.col('^.*_nbb_ind$'),
+        pl.col('^.*_nbo_ind$')
+    ])
+
+    frac_nbbo = frac_nbbo.with_columns([
+        (pl.col('^.*_nbb_ind$') / pl.sum_horizontal('^.*_nbb_ind$')).mul(pl.col('diff')),
+        (pl.col('^.*_nbo_ind$') / pl.sum_horizontal('^.*_nbo_ind$')).mul(pl.col('diff')),
+    ])
+
+    frac_nbbo = frac_nbbo.groupby('floor').agg([
+        pl.col('^.*_nbb_ind$').sum() / 60000000,
+        pl.col('^.*_nbo_ind$').sum() / 60000000,
+    ])
+
+    return frac_nbbo.collect()

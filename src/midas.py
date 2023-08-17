@@ -109,6 +109,7 @@ def index_worker(symbol, date, file_name):
     generator = IndexGenerator(df)
     csv_buffer = StringIO()
     tr = generator.generate_tr()
+    os.makedirs(f'{OUT_DIR}/{date}/', exist_ok=True)
     
     with open(f'{OUT_DIR}/{date}/tr_{symbol}.csv', 'a') as f:
         fcntl.flock(f, fcntl.LOCK_EX)
