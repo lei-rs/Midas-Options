@@ -8,12 +8,12 @@ from .helpers import convert_time, check_dir
 
 class IndexGenerator:
     def __init__(self, data):
-        self.data = data.loc[(data['0'] == 'F@') | (data['12'].isin(['I', 'S']))].reset_index(drop=True)
-        self.quotes = self.data.loc[self.data['0'] == 'F@'].reset_index(drop=True)
+        self.data = data.loc[(data['c1'] == 'F@') | (data['c13'].isin(['I', 'S']))].reset_index(drop=True)
+        self.quotes = self.data.loc[self.data['c1'] == 'F@'].reset_index(drop=True)
         self.quotes.iloc[:, [6, 10]] = self.quotes.iloc[:, [6, 10]].astype(int)
         self.quotes.iloc[:, [7, 11]] = self.quotes.iloc[:, [7, 11]].astype(float)
         self.quotes_ar = self.quotes.to_numpy()
-        self.trades = self.data.loc[self.data['12'].isin(['I', 'S'])]
+        self.trades = self.data.loc[self.data['c13'].isin(['I', 'S'])]
         self.trades.iloc[:, 7] = self.trades.iloc[:, 7].astype(int)
         self.trades.iloc[:, 8] = self.trades.iloc[:, 8].astype(float)
         self.trades = self.trades.reset_index().to_numpy()
