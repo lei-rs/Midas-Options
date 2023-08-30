@@ -81,13 +81,13 @@ def time_at_nbbo(quotes: pl.DataFrame):
     ])
 
     frac_nbbo = frac_nbbo.with_columns([
-        (pl.col('^.*_nbb_ind$') / pl.sum_horizontal('^.*_nbb_ind$')).mul(pl.col('diff')),
-        (pl.col('^.*_nbo_ind$') / pl.sum_horizontal('^.*_nbo_ind$')).mul(pl.col('diff')),
+        pl.col('^.*_nbb_ind$').mul(pl.col('diff')),
+        pl.col('^.*_nbo_ind$').mul(pl.col('diff')),
     ])
 
     frac_nbbo = frac_nbbo.groupby('floor').agg([
         pl.col('^.*_nbb_ind$').sum() / 60000000,
         pl.col('^.*_nbo_ind$').sum() / 60000000,
-    ])
+    ]).collect()
 
-    return frac_nbbo.collect()
+    return frac_nbbo
