@@ -34,11 +34,19 @@ def get_trading_days(date_start, date_end):
     return result
 
 
-def cast_types(df: pl.DataFrame):
+def cast_quotes(df: pl.DataFrame):
     return df.with_columns([
         pl.from_epoch(pl.col('c2'), time_unit='us'),
         pl.col('c7').cast(pl.UInt16, strict=False),
-        pl.col('c8').cast(pl.Float32, strict=False),
+        pl.col('c8').cast(pl.Float32, strict=False).round(2),
         pl.col('c11').cast(pl.UInt16, strict=False),
-        pl.col('c12').cast(pl.Float32, strict=False),
+        pl.col('c12').cast(pl.Float32, strict=False).round(2),
+    ])
+
+
+def cast_trades(df: pl.DataFrame):
+    return df.with_columns([
+        pl.from_epoch(pl.col('c2'), time_unit='us'),
+        pl.col('c8').cast(pl.UInt16, strict=False),
+        pl.col('c9').cast(pl.Float32, strict=False).round(2),
     ])

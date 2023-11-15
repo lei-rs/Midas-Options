@@ -1,7 +1,12 @@
 from datetime import timedelta
+from typing import Set, Optional
 
 import numpy as np
+import pandas as pd
 import polars as pl
+from polars import DataFrame, Series
+
+from src.helpers import cast_quotes, cast_trades
 
 
 def _pivot_and_fill(quotes: pl.DataFrame):
@@ -51,7 +56,6 @@ def generate_nbbo(quotes: pl.DataFrame):
         pl.col('c2').cast(pl.Time),
         pl.col('nbb'),
         pl.col('nbo'),
-        pl.col('^(c7|c11).*$'),
         pl.col('^c15.*$'),
         pl.col('^.*_nbb_ind$'),
         pl.col('^.*_nbo_ind$')
@@ -91,3 +95,66 @@ def time_at_nbbo(quotes: pl.DataFrame):
     ]).collect()
 
     return frac_nbbo
+
+
+class ExecutionAnalysis:
+    def __init__(self, raw: pl.DataFrame, subset: Optional[Set] = None):
+        self.nbbo_buckets = self._generate_nbbo(raw)
+        raw = raw.with_columns(
+            pl.when(pl.col('c10') == '-').then(pl.col('c12')).otherwise(pl.col('c10')).alias('c10'),
+        )
+        self.by_exchange = raw.partition_by('c10', as_dict=True)
+        for k, v in self.by_exchange.items():
+            if subset is not None and k not in subset:
+                continue
+            v = v.sort('c2').with_columns(
+                pl.arange(0, v.height).alias('index')
+            )
+            self.by_exchange[k] = cast_quotes(v)
+
+    def find_q6(self, idx: int, direction: str, ex: str):
+        raw = self.by_exchange[ex]
+        first = q6 = raw[idx - 1]
+        for i in range(-1, idx - 1, -1):
+            curr = raw[i]
+            if curr['c8'] == 'FT':
+                continue
+            elif direction == 's' and first['c12', 'c15'] == curr['c12', 'c15']:
+                q6 = curr
+            elif direction == 'b' and first['c8', 'c15'] == curr['c8', 'c15']:
+                q6 = curr
+            else:
+                break
+        return q6.to_numpy().flatten()[[1, 6, 7, 10, 11, 14]]
+
+    @staticmethod
+    def _get_directions(trades: DataFrame, raw: DataFrame) -> Series:
+        fq_idxs = (trades[:, 'index'] - 1).to_series().to_list()
+        prices = trades[:, 'c9'].to_series()
+        bids = raw[fq_idxs, 'c8'].to_series()
+        asks = raw[fq_idxs, 'c12'].to_series()
+        return (
+            pl.when(prices.eq(bids)).then('b')
+            .when(prices.eq(asks)).then('s')
+        )
+
+    @staticmethod
+    def _generate_nbbo(raw: pl.DataFrame) -> pd.DataFrame:
+        raw = raw.filter(pl.col('c1') == 'F@')
+        raw = cast_quotes(raw)
+        raw = generate_nbbo(raw)
+        return time_at_nbbo(raw)
+
+    def _exchange_report(self, ex: str):
+        raw = self.by_exchange[ex]
+        info = []
+        trades = raw.filter(pl.col('c1').eq('FT') & pl.col('c13').is_in({'I', 'S'}))
+        trades = cast_trades(trades)
+        trades = trades.with_columns([
+            self._get_directions(trades, raw).alias('dir'),
+        ])
+
+        for trade in trades.iter_rows():
+            info.append(self.find_q6(trade[-2], trade[-1], ex))
+        info = np.asarray(info)
+        return np.concatenate([trades.to_numpy(), info], axis=1)

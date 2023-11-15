@@ -1,4 +1,3 @@
-import numpy as np
 import polars as pl
 
 
@@ -60,3 +59,5 @@ def generate_qr(quotes: pl.DataFrame):
         how='horizontal').sort('floor')[:-1]
 
     return agg.with_columns([pl.col('floor').cast(pl.Time)])
+
+
