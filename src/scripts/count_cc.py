@@ -1,7 +1,8 @@
 import glob
-from tqdm import tqdm
 import polars as pl
 from polars import DataFrame
+
+from src import get_trading_days
 
 
 def count_cc(path: str, date: str) -> DataFrame:
@@ -35,11 +36,11 @@ def count_cc(path: str, date: str) -> DataFrame:
 
 if __name__ == '__main__':
     dir = "./scratch/spxw_nov"
-    files = glob.glob(f'{dir}/*.parquet.gzip', recursive=True)
+    dates = get_trading_days(20210104, 20210108)
     f = open("counts.csv", "a")
     f.write("date,symbol,A,B,C,O\n")
-    for file in tqdm(files):
-        print(file)
-        date = file.split('/')[-3]
-        df = count_cc(file, date)
-        df.write_csv(f, has_header=False)
+
+    for date in dates:
+        for path in glob.glob(f"{dir}/{date}/*.parquet"):
+            df = count_cc(path, date)
+            df.write_csv(f, has_header=False)
