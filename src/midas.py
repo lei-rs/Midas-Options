@@ -11,7 +11,7 @@ import os
 from .index import IndexGenerator
 
 CHUNK = 10000
-DATA_DIR = None 
+DATA_DIR = None
 SYMBOL_DIR = None
 OUT_DIR = None
 
@@ -19,7 +19,10 @@ OUT_DIR = None
 class ProcReader:
     def __init__(self, cmd):
         self.proc = subprocess.Popen(
-            cmd, shell=True, executable='/bin/bash', stdout=subprocess.PIPE,
+            cmd,
+            shell=True,
+            executable="/bin/bash",
+            stdout=subprocess.PIPE,
         )
 
     def __iter__(self):
@@ -52,15 +55,17 @@ class Product:
             self._write()
 
     def _write(self):
-        df = pd.DataFrame(self.data, columns=[f'c{i}' for i in range(1, 16)])
-        symbol = self.data[0][5].split('_')[0]
-        os.makedirs(f'{DATA_DIR}/{self.date}/{symbol}/', exist_ok=True)
-        path = f'{DATA_DIR}/{self.date}/{symbol}/{self.product}.parquet.gzip'
-        
+        df = pd.DataFrame(self.data, columns=[f"c{i}" for i in range(1, 16)])
+        symbol = self.data[0][5].split("_")[0]
+        os.makedirs(f"{DATA_DIR}/{self.date}/{symbol}/", exist_ok=True)
+        path = f"{DATA_DIR}/{self.date}/{symbol}/{self.product}.parquet.gzip"
+
         if not os.path.isfile(path):
-            df.to_parquet(path, index=None, engine='fastparquet', compression='gzip')
+            df.to_parquet(path, index=None, engine="fastparquet", compression="gzip")
         else:
-            df.to_parquet(path, index=None, engine='fastparquet', compression='gzip', append=True)
+            df.to_parquet(
+                path, index=None, engine="fastparquet", compression="gzip", append=True
+            )
 
         self.data = []
 
@@ -70,8 +75,10 @@ class SplitProducts:
         self._twxm = twxm
         self.products = {}
         self.date = date
-        with_trades = list(pd.read_csv(SYMBOL_DIR.format(date))['symbol'])
-        self.with_trades = set([s.replace('_', '').replace(' ', '') for s in with_trades])
+        with_trades = list(pd.read_csv(SYMBOL_DIR.format(date))["symbol"])
+        self.with_trades = set(
+            [s.replace("_", "").replace(" ", "") for s in with_trades]
+        )
 
     def _save_data(self, product: str, row: str):
         if product in self.products:
@@ -83,9 +90,9 @@ class SplitProducts:
 
     def execute(self):
         for twxm_byte in self._twxm:
-            twxm = twxm_byte.decode('utf-8').split(' ')
-            product = twxm[5].replace('_', '')
-            
+            twxm = twxm_byte.decode("utf-8").split(" ")
+            product = twxm[5].replace("_", "")
+
             if product in self.with_trades:
                 self._save_data(product, twxm)
                 self.products[product].check()
@@ -95,23 +102,19 @@ class SplitProducts:
 
 
 def download(symbol, date):
-    twxm = ProcReader(f'twxm {date} opra {symbol}_*')
+    twxm = ProcReader(f"twxm {date} opra {symbol}_*")
     SplitProducts(twxm, date).execute()
 
-    
+
 def index_worker(symbol, date, file_name):
-    df = pd.read_parquet(f'{DATA_DIR}/{date}/{symbol}/{file_name}')
-    params = {
-        'index': False,
-        'float_format': '%.3f',
-        'header': False
-    }
+    df = pd.read_parquet(f"{DATA_DIR}/{date}/{symbol}/{file_name}")
+    params = {"index": False, "float_format": "%.3f", "header": False}
     generator = IndexGenerator(df)
     csv_buffer = StringIO()
     tr = generator.generate_tr()
-    os.makedirs(f'{OUT_DIR}/{date}/', exist_ok=True)
-    
-    with open(f'{OUT_DIR}/{date}/tr_{symbol}.csv', 'a') as f:
+    os.makedirs(f"{OUT_DIR}/{date}/", exist_ok=True)
+
+    with open(f"{OUT_DIR}/{date}/tr_{symbol}.csv", "a") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         tr.to_csv(f, **params)
         fcntl.flock(f, fcntl.LOCK_UN)

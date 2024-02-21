@@ -8,12 +8,14 @@ from .helpers import convert_time, check_dir
 
 class IndexGenerator:
     def __init__(self, data):
-        self.data = data.loc[(data['c1'] == 'F@') | (data['c13'].isin(['I', 'S']))].reset_index(drop=True)
-        self.quotes = self.data.loc[self.data['c1'] == 'F@'].reset_index(drop=True)
+        self.data = data.loc[
+            (data["c1"] == "F@") | (data["c13"].isin(["I", "S"]))
+        ].reset_index(drop=True)
+        self.quotes = self.data.loc[self.data["c1"] == "F@"].reset_index(drop=True)
         self.quotes.iloc[:, [6, 10]] = self.quotes.iloc[:, [6, 10]].astype(int)
         self.quotes.iloc[:, [7, 11]] = self.quotes.iloc[:, [7, 11]].astype(float)
         self.quotes_ar = self.quotes.to_numpy()
-        self.trades = self.data.loc[self.data['c13'].isin(['I', 'S'])]
+        self.trades = self.data.loc[self.data["c13"].isin(["I", "S"])]
         self.trades.iloc[:, 7] = self.trades.iloc[:, 7].astype(int)
         self.trades.iloc[:, 8] = self.trades.iloc[:, 8].astype(float)
         self.trades = self.trades.reset_index().to_numpy()
@@ -33,11 +35,14 @@ class IndexGenerator:
         next_bid = self.quotes_ar[ind + 1, [6, 7]]
         next_ask = self.quotes_ar[ind + 1, [10, 11]]
 
-        if (np.array_equal(bid, tx) and tx[1] != next_bid[1]) or (np.array_equal(ask, tx) and tx[1] != next_ask[1]):
+        if (np.array_equal(bid, tx) and tx[1] != next_bid[1]) or (
+            np.array_equal(ask, tx) and tx[1] != next_ask[1]
+        ):
             return True
 
-        elif (tx[0] + next_bid[0] == bid[0] and (tx[1] == bid[1] == next_bid[1])) or \
-                (tx[0] + next_ask[0] == ask[0] and (tx[1] == ask[1] == next_ask[1])):
+        elif (tx[0] + next_bid[0] == bid[0] and (tx[1] == bid[1] == next_bid[1])) or (
+            tx[0] + next_ask[0] == ask[0] and (tx[1] == ask[1] == next_ask[1])
+        ):
             return True
 
         return False
@@ -68,7 +73,7 @@ class IndexGenerator:
         for i in range(ind, -1, -1):
             order = self.quotes_ar[i]
 
-            if order[14] == 'A':
+            if order[14] == "A":
                 return order
 
         return [None] * 15
@@ -82,7 +87,7 @@ class IndexGenerator:
             if i == 0:
                 q3 = self.quotes_ar[i]
 
-            if direction == 's':
+            if direction == "s":
                 curr = self.quotes_ar[ind, [7, 8]]
                 prev = self.quotes_ar[i, [7, 8]]
 
@@ -105,7 +110,7 @@ class IndexGenerator:
         for i in range(ind + 1, self.num_orders):
             order = self.quotes_ar[i]
 
-            if order[14] == 'A':
+            if order[14] == "A":
                 return order
 
         return [None] * 15
@@ -114,7 +119,7 @@ class IndexGenerator:
         for i in range(ind + 1, self.num_orders):
             order = self.quotes_ar[i]
 
-            if order[0] == 'F@':
+            if order[0] == "F@":
                 return order
 
         return [None] * 15
@@ -122,7 +127,9 @@ class IndexGenerator:
     def generate_trade(self, ind, new_ind, tx_price, start, indicator, fin=None):
         q1 = self.quotes_ar[new_ind]
         q2 = self.find_q2(new_ind)
-        q3, q6 = self.find_q3_q6(new_ind, check_dir(tx_price, (float(q1[7]) + float(q1[11])) / 2))
+        q3, q6 = self.find_q3_q6(
+            new_ind, check_dir(tx_price, (float(q1[7]) + float(q1[11])) / 2)
+        )
         q4 = self.find_q4(new_ind)
         q5 = self.find_q5(new_ind)
         q7 = [None] * 15
@@ -150,14 +157,20 @@ class IndexGenerator:
             tx_price = curr_trade[9]
             new_ind, indicator = self.find_ind(curr_ind - i - 1, tx_amount, tx_price)
 
-            if indicator and (i != self.num_trades - 1) and (curr_trade[0] == self.trades[i + 1][0] - 1):
+            if (
+                indicator
+                and (i != self.num_trades - 1)
+                and (curr_trade[0] == self.trades[i + 1][0] - 1)
+            ):
                 next_trade = self.trades[i + 1]
                 curr_ind = curr_trade[0]
                 agg_amount = curr_trade[8]
                 tx_price = curr_trade[9]
                 count = 1
 
-                while (curr_trade[0] == next_trade[0] - 1) and (curr_trade[9] == next_trade[9]):
+                while (curr_trade[0] == next_trade[0] - 1) and (
+                    curr_trade[9] == next_trade[9]
+                ):
                     agg_amount += next_trade[8]
                     count += 1
 
@@ -166,9 +179,13 @@ class IndexGenerator:
 
                     next_trade = self.trades[i + count]
 
-                new_ind, indicator = self.find_ind(curr_ind - i - 1, agg_amount, tx_price)
+                new_ind, indicator = self.find_ind(
+                    curr_ind - i - 1, agg_amount, tx_price
+                )
                 self.last_loc = new_ind
-                self.generate_trade(curr_ind - i - 1, new_ind, tx_price, i, indicator, i + count)
+                self.generate_trade(
+                    curr_ind - i - 1, new_ind, tx_price, i, indicator, i + count
+                )
 
                 i += count
 
@@ -182,11 +199,28 @@ class IndexGenerator:
 
 class IndexTradeReport:
     def __init__(self):
-        quotes = [[f'q{i}_bb', f'q{i}_bb_size', f'q{i}_bo', f'q{i}_bo_size', f'q{i}_quote_ts', f'q{i}_quote_condition']
-                  for i in range(1, 9)]
-        self.header = ['option', 'indicator', 'trade_time', 'trade_size', 'trade_price', 'midpoint', 'trade_code']
+        quotes = [
+            [
+                f"q{i}_bb",
+                f"q{i}_bb_size",
+                f"q{i}_bo",
+                f"q{i}_bo_size",
+                f"q{i}_quote_ts",
+                f"q{i}_quote_condition",
+            ]
+            for i in range(1, 9)
+        ]
+        self.header = [
+            "option",
+            "indicator",
+            "trade_time",
+            "trade_size",
+            "trade_price",
+            "midpoint",
+            "trade_code",
+        ]
         self.header += [item for sublist in quotes for item in sublist]
-        self.header.insert(25, 'time_to_fill')
+        self.header.insert(25, "time_to_fill")
         self.trade_report = None
         self.flag = True
 
@@ -197,10 +231,16 @@ class IndexTradeReport:
         if quotes[0][1] is None or quotes[2][1] is None:
             dif = None
         else:
-            dif = str((dt.datetime.strptime(ts[1], '%H:%M:%S.%f') - dt.datetime.strptime(ts[3],
-                                                                                         '%H:%M:%S.%f')).total_seconds())
+            dif = str(
+                (
+                    dt.datetime.strptime(ts[1], "%H:%M:%S.%f")
+                    - dt.datetime.strptime(ts[3], "%H:%M:%S.%f")
+                ).total_seconds()
+            )
 
-        quotes = [[q[7], q[6], q[11], q[10], ts[i + 1], q[14]] for i, q in enumerate(quotes)]
+        quotes = [
+            [q[7], q[6], q[11], q[10], ts[i + 1], q[14]] for i, q in enumerate(quotes)
+        ]
         row = [tx[5], indicator, ts[0], tx[7], tx[8], midpoint, tx[12]]
         row += [item for sublist in quotes for item in sublist]
         row.insert(25, dif)
