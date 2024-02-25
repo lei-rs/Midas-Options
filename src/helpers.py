@@ -99,7 +99,7 @@ def prep_quotes(df: LazyFrame) -> LazyFrame:
     # Cast types
     df = df.with_columns(
         [
-            # pl.from_epoch(pl.col("time"), time_unit="us"),
+            pl.from_epoch(pl.col("time"), time_unit="us"),
             pl.col("bid_size").cast(pl.Float32).round(0).cast(pl.UInt16),
             pl.col("bid_price").cast(pl.Float32).round(2),
             pl.col("ask_size").cast(pl.Float32).round(0).cast(pl.UInt16),

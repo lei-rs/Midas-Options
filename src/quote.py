@@ -1,63 +1,62 @@
+import datetime
+
 import polars as pl
 from polars import LazyFrame, DataFrame
 
 
-def _add_floor_rows(quotes):
-    bounds = quotes[[0, -1], "c2"].select(pl.col("c2").dt.truncate("1m"))
+def _add_floor_rows(quotes: LazyFrame) -> LazyFrame:
+    temp = quotes.select(pl.col("time").dt.truncate("1m")).collect()
+    start = temp.item(0, "time")
+    end = temp.item(-1, "time")
     rng = pl.date_range(
-        bounds[0, "c2"],
-        pl.select(bounds[-1, "c2"] + pl.duration(minutes=1)).item(),
+        start,
+        (end + pl.duration(minutes=1)),
         "1m",
         eager=True,
     )[1:]
-    rng = rng.filter(~rng.is_in(quotes["c2"]))
-    df2 = pl.DataFrame({"c2": rng})
-    quotes = pl.concat([quotes.lazy(), df2.lazy()], how="diagonal").sort("c2")
-    quotes = quotes.select(pl.all().forward_fill())
+    time = pl.DataFrame({"time": rng}).lazy()
+    quotes = (
+        quotes.join(time, on="time", how="outer")
+        .with_columns(pl.col("time").fill_null(pl.col("time_right")))
+        .drop("time_right")
+        .sort("time")
+        .select(pl.all().forward_fill())
+    )
     return quotes
 
 
-def generate_qr(quotes: pl.DataFrame):
-    quotes = _add_floor_rows(quotes)
-
-    quotes = quotes.with_columns(
-        [
-            pl.col("c2").dt.truncate("1m").alias("floor"),
-            pl.col("c2").diff().shift(-1).alias("dif"),
-        ]
-    ).collect()
-
-    agg = (
-        quotes.lazy()
-        .groupby("floor", "c15")
-        .agg([pl.col("dif").sum() / pl.duration(minutes=1)])
-        .collect()
-        .pivot(values="dif", index="floor", columns="c15")
-        .sort("floor")
-    ).with_columns(
-        pl.col("floor") + pl.duration(minutes=1),
+def generate_qr(quotes: LazyFrame) -> LazyFrame:
+    quotes = quotes.filter(pl.col("type").ne("FT")).select(
+        "time", "bid_size", "condition"
+    )
+    quotes = (
+        _add_floor_rows(quotes)
+        .with_columns(
+            pl.col("time").diff().shift(-1).alias("dif"),
+        )
+        .group_by(pl.col("time").dt.truncate("1m"))
+        .agg(
+            [
+                pl.col("dif").filter(pl.col("condition").eq(col)).sum().alias(col)
+                for col in ["A", "B", "C", "O"]
+            ]
+            + [
+                pl.col("dif")
+                .filter(pl.col("condition").eq(col) & pl.col("bid_size").gt(0))
+                .sum()
+                .alias(f"{col}_ts")
+                for col in ["A", "B", "C", "O"]
+            ]
+        )
+        .with_columns(
+            [
+                pl.col(col) / pl.duration(minutes=1)
+                for col in ["A", "B", "C", "O", "A_ts", "B_ts", "C_ts", "O_ts"]
+            ]
+        )
     )
 
-    idx = agg["floor"].to_list()
-    quotes = quotes.filter(
-        pl.col("c2").is_in(idx),
-    )
-
-    agg = pl.concat(
-        [
-            agg.select(["floor", "A", "B", "C", "O"]),
-            quotes.select(
-                pl.col("c6").alias("symbol"),
-                pl.col("c7").alias("bid_size"),
-                pl.col("c8").alias("bid_price"),
-                pl.col("c11").alias("ask_size"),
-                pl.col("c12").alias("ask_price"),
-            ),
-        ],
-        how="horizontal",
-    ).sort("floor")[:-1]
-
-    return agg.with_columns([pl.col("floor").cast(pl.Time)])
+    return quotes
 
 
 def find_turning_quotes(df: LazyFrame) -> LazyFrame:
