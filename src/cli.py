@@ -36,23 +36,10 @@ def save_result(df: pandas.DataFrame | pl.DataFrame, path_in: str, path_out: str
         raise ValueError(f"Invalid dataframe type: {type(df)}")
 
 
-def par_generate(fn):
-    def par_fn(lock, path_in: str, path_out: str):
-        try:
-            df = fn(path_in)
-            with lock:
-                save_result(df, path_in, path_out)
-
-        except Exception as e:
-            return e
-
-    return par_fn
-
-
 def do_generate(in_dir: str, out_dir: str, kind: str, workers: int = None):
     if not os.path.exists(in_dir):
         raise FileNotFoundError(f"Directory {in_dir} does not exist")
-    os.makedirs(out_dir)
+    os.makedirs(out_dir, exist_ok=True)
     if kind not in PROC_FN:
         raise ValueError(f"Invalid report type to generate: {kind}")
 
@@ -62,12 +49,21 @@ def do_generate(in_dir: str, out_dir: str, kind: str, workers: int = None):
 
     fn = PROC_FN[kind]
     if workers and workers > 1:
+        def par_fn(lock, path_in: str, path_out: str):
+            try:
+                df = fn(path_in)
+                with lock:
+                    save_result(df, path_in, path_out)
+
+            except Exception as e:
+                return e
+
         pool = ProcessPoolExecutor()
         m = Manager()
         lock = m.Lock()
         for result in tqdm(
             pool.map(
-                par_generate(fn),
+                par_fn,
                 [lock] * len(raw_files),
                 [str(file) for file in raw_files],
                 [out_dir] * len(raw_files),
