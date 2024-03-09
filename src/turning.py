@@ -1,6 +1,7 @@
 import polars as pl
 from polars import LazyFrame
-from cli import polars_generate
+
+from .helpers import polars_generate
 
 
 @polars_generate

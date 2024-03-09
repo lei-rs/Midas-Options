@@ -1,4 +1,5 @@
 import datetime as dt
+from typing import Callable
 
 import polars as pl
 from polars import DataFrame, LazyFrame
@@ -55,6 +56,15 @@ def cast_trades(df: pl.DataFrame):
             pl.col("c9").cast(pl.Float32, strict=False).round(2),
         ]
     )
+
+
+def polars_generate(fn: Callable[[LazyFrame], LazyFrame]):
+    def polars_fn(path_in: str):
+        df = pl.scan_parquet(path_in)
+        df = prep_quotes(df)
+        return fn(df).collect()
+
+    return polars_fn
 
 
 def prep_quotes(df: LazyFrame) -> LazyFrame:

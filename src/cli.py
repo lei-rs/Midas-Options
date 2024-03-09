@@ -7,45 +7,39 @@ from multiprocessing import Manager
 import pandas
 import polars as pl
 from turning import generate_turning
-from helpers import prep_quotes
 
 PROC_FN = {
     "turning": generate_turning,
 }
 
 
-def polars_generate(fn):
-    def polars_fn(path_in):
-        df = pl.scan_parquet(path_in)
-        df = prep_quotes(df)
-        return fn(df)
+def save_result(df: pandas.DataFrame | pl.DataFrame, path_in: str, path_out: str):
+    path_in = path_in.split("/")
+    date = path_in[-3]
+    under = path_in[-2]
+    path_out = Path(path_out) / f"{date}_{under}.csv"
 
-    return polars_fn
+    if not os.path.exists(path_out):
+        f = open(path_out, "w")
+        f.write(",".join(df.columns) + "\n")
+        f.close()
+
+    if isinstance(df, pandas.DataFrame):
+        df.to_csv(path_out, index=False, header=False, mode="a")
+    elif isinstance(df, pl.DataFrame):
+        f = open(path_out, "ab")
+        df.write_csv(f, include_header=False)
+        f.close()
+    else:
+        raise ValueError(f"Invalid dataframe type: {type(df)}")
 
 
 def par_generate(fn):
-    def par_fn(lock, path_in, path_out):
+    def par_fn(lock, path_in: str, path_out: str):
         try:
             df = fn(path_in)
-            path_in = path_in.split("/")
-            date = path_in[-3]
-            under = path_in[-2]
-            path_out = Path(path_out) / f"{date}_{under}.csv"
-
             with lock:
-                if not os.path.exists(path_out):
-                    f = open(path_out, "w")
-                    f.write(",".join(df.columns) + "\n")
-                    f.close()
-
-                if isinstance(df, pandas.DataFrame):
-                    df.to_csv(path_out, index=False, header=False, mode="a")
-                elif isinstance(df, pl.DataFrame):
-                    f = open(path_out, "ab")
-                    df.write_csv(f, include_header=False)
-                    f.close()
-                else:
-                    raise ValueError(f"Invalid dataframe type: {type(df)}")
+                save_result(df, path_in, path_out)
 
         except Exception as e:
             return e
@@ -85,9 +79,9 @@ class Midas(cmd.Cmd):
             for result in tqdm(
                 pool.map(
                     par_generate(fn),
-                    raw_files,
-                    [out_dir] * len(raw_files),
                     [lock] * len(raw_files),
+                    [str(file) for file in raw_files],
+                    [out_dir] * len(raw_files),
                 ),
                 total=len(raw_files),
             ):
@@ -95,7 +89,8 @@ class Midas(cmd.Cmd):
                     raise result
         else:
             for file in tqdm(raw_files):
-                fn(file, out_dir)
+                df = fn(str(file))
+                save_result(df, str(file), out_dir)
 
 
 if __name__ == "__main__":
