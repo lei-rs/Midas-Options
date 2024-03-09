@@ -67,7 +67,7 @@ def do_generate(in_dir: str, out_dir: str, kind: str, workers: int = None):
                 return e
         _LocalFunctions.add_functions(par_fn)
 
-        pool = ProcessPoolExecutor()
+        pool = ProcessPoolExecutor(max_workers=workers)
         m = Manager()
         lock = m.Lock()
         for result in tqdm(
