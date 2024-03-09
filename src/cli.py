@@ -15,6 +15,14 @@ PROC_FN = {
 }
 
 
+class _LocalFunctions:
+    @classmethod
+    def add_functions(cls, *args):
+        for function in args:
+            setattr(cls, function.__name__, function)
+            function.__qualname__ = cls.__qualname__ + '.' + function.__name__
+
+
 def save_result(df: pandas.DataFrame | pl.DataFrame, path_in: str, path_out: str):
     path_in = path_in.split("/")
     date = path_in[-3]
@@ -57,6 +65,7 @@ def do_generate(in_dir: str, out_dir: str, kind: str, workers: int = None):
 
             except Exception as e:
                 return e
+        _LocalFunctions.add_functions(par_fn)
 
         pool = ProcessPoolExecutor()
         m = Manager()
