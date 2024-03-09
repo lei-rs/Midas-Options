@@ -7,7 +7,7 @@ from multiprocessing import Manager
 import pandas
 import polars as pl
 from turning import generate_turning
-
+from helpers import prep_quotes
 
 PROC_FN = {
     "turning": generate_turning,
@@ -17,6 +17,7 @@ PROC_FN = {
 def polars_generate(fn):
     def polars_fn(path_in):
         df = pl.scan_parquet(path_in)
+        df = prep_quotes(df)
         return fn(df)
 
     return polars_fn
