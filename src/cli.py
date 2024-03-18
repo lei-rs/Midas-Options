@@ -1,18 +1,21 @@
 import os
 from concurrent.futures import ProcessPoolExecutor
-from multiprocessing import Manager
+from multiprocessing import Manager, get_context
 from pathlib import Path
+from itertools import repeat
 
 import argparse
 import pandas
 import polars as pl
 from tqdm import tqdm
 
+from .mbm import generate_mbm
 from .turning import generate_turning
 from .helpers import polars_generate
 
 PROC_FN = {
     "turning": polars_generate(generate_turning),
+    "mbm": polars_generate(generate_mbm),
 }
 
 
@@ -22,6 +25,14 @@ class _LocalFunctions:
         for function in args:
             setattr(cls, function.__name__, function)
             function.__qualname__ = cls.__qualname__ + "." + function.__name__
+
+
+def iter_raw(in_dir: str):
+    in_dir = Path(in_dir)
+    for date in os.listdir(in_dir):
+        for under in os.listdir(in_dir / date):
+            for file in os.listdir(in_dir / date / under):
+                yield str(in_dir / date / under / file)
 
 
 def save_result(df: pandas.DataFrame | pl.DataFrame, path_in: str, path_out: str):
@@ -52,10 +63,6 @@ def do_generate(in_dir: str, out_dir: str, kind: str, workers: int = None):
     if kind not in PROC_FN:
         raise ValueError(f"Invalid report type to generate: {kind}")
 
-    raw_files = list(Path(in_dir).rglob("*.parquet.gzip"))
-    if not len(raw_files):
-        raise FileNotFoundError(f"No files to process in {in_dir}")
-
     fn = PROC_FN[kind]
     if workers and workers > 1:
 
@@ -70,22 +77,23 @@ def do_generate(in_dir: str, out_dir: str, kind: str, workers: int = None):
 
         _LocalFunctions.add_functions(par_fn)
 
-        pool = ProcessPoolExecutor(max_workers=workers)
+        context = get_context('spawn')
+        pool = ProcessPoolExecutor(max_workers=workers, mp_context=context)
         m = Manager()
         lock = m.Lock()
         for result in tqdm(
             pool.map(
                 par_fn,
-                [lock] * len(raw_files),
-                [str(file) for file in raw_files],
-                [out_dir] * len(raw_files),
+                repeat(lock),
+                [str(file) for file in iter_raw(in_dir)],
+                repeat(out_dir),
             ),
-            total=len(raw_files),
+
         ):
             if result:
                 raise result
     else:
-        for file in tqdm(raw_files):
+        for file in tqdm(iter_raw(in_dir)):
             df = fn(str(file))
             save_result(df, str(file), out_dir)
 
