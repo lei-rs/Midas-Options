@@ -9,9 +9,10 @@ import polars as pl
 from tqdm import tqdm
 
 from .turning import generate_turning
+from .helpers import polars_generate
 
 PROC_FN = {
-    "turning": generate_turning,
+    "turning": polars_generate(generate_turning),
 }
 
 
@@ -20,7 +21,7 @@ class _LocalFunctions:
     def add_functions(cls, *args):
         for function in args:
             setattr(cls, function.__name__, function)
-            function.__qualname__ = cls.__qualname__ + '.' + function.__name__
+            function.__qualname__ = cls.__qualname__ + "." + function.__name__
 
 
 def save_result(df: pandas.DataFrame | pl.DataFrame, path_in: str, path_out: str):
@@ -57,6 +58,7 @@ def do_generate(in_dir: str, out_dir: str, kind: str, workers: int = None):
 
     fn = PROC_FN[kind]
     if workers and workers > 1:
+
         def par_fn(lock, path_in: str, path_out: str):
             try:
                 df = fn(path_in)
@@ -65,6 +67,7 @@ def do_generate(in_dir: str, out_dir: str, kind: str, workers: int = None):
 
             except Exception as e:
                 return e
+
         _LocalFunctions.add_functions(par_fn)
 
         pool = ProcessPoolExecutor(max_workers=workers)
