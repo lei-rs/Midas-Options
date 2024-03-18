@@ -63,6 +63,10 @@ def do_generate(in_dir: str, out_dir: str, kind: str, workers: int = None):
     if kind not in PROC_FN:
         raise ValueError(f"Invalid report type to generate: {kind}")
 
+    raw_files = list(iter_raw(in_dir))
+    if not len(raw_files):
+        raise FileNotFoundError(f"No files to process in {in_dir}")
+
     fn = PROC_FN[kind]
     if workers and workers > 1:
 
@@ -77,23 +81,23 @@ def do_generate(in_dir: str, out_dir: str, kind: str, workers: int = None):
 
         _LocalFunctions.add_functions(par_fn)
 
-        context = get_context('spawn')
+        context = get_context("spawn")
         pool = ProcessPoolExecutor(max_workers=workers, mp_context=context)
         m = Manager()
         lock = m.Lock()
         for result in tqdm(
             pool.map(
                 par_fn,
-                repeat(lock),
-                [str(file) for file in iter_raw(in_dir)],
-                repeat(out_dir),
+                repeat(lock, len(raw_files)),
+                raw_files,
+                repeat(out_dir, len(raw_files)),
             ),
-
+            total=len(raw_files),
         ):
             if result:
                 raise result
     else:
-        for file in tqdm(iter_raw(in_dir)):
+        for file in tqdm(raw_files):
             df = fn(str(file))
             save_result(df, str(file), out_dir)
 
