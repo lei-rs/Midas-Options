@@ -1,8 +1,10 @@
 import polars as pl
 from polars import LazyFrame
 
+from .helpers import polars_generate
 
-def generate_turning(df: LazyFrame) -> LazyFrame:
+
+def _generate_turning(df: LazyFrame) -> LazyFrame:
     df = (
         df.filter(pl.col("type").eq("F@"))
         .drop(["type", "exchange"])
@@ -22,3 +24,8 @@ def generate_turning(df: LazyFrame) -> LazyFrame:
         )
     )
     return df
+
+
+@polars_generate
+def generate_turning(df: LazyFrame) -> LazyFrame:
+    return _generate_turning(df)

@@ -11,12 +11,11 @@ from tqdm import tqdm
 
 from .mbm import generate_mbm
 from .turning import generate_turning
-from .helpers import polars_generate
 
 
 PROC_FN = {
-    "turning": polars_generate(generate_turning),
-    "mbm": polars_generate(generate_mbm),
+    "turning": generate_turning,
+    "mbm": generate_mbm,
 }
 
 
@@ -49,6 +48,7 @@ def par_fn(fn, lock, path_in: str, path_out: str):
 
     except Exception as e:
         return e
+
 
 def iter_raw(in_dir: str):
     in_dir = Path(in_dir)

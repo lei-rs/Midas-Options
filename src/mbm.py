@@ -1,6 +1,8 @@
 import polars as pl
 from polars import LazyFrame
 
+from .helpers import polars_generate
+
 
 def _add_floor_rows(quotes: LazyFrame) -> LazyFrame:
     temp = quotes.select(pl.col("time").dt.truncate("1m")).collect()
@@ -23,7 +25,7 @@ def _add_floor_rows(quotes: LazyFrame) -> LazyFrame:
     return quotes
 
 
-def generate_mbm(quotes: LazyFrame) -> LazyFrame:
+def _generate_mbm(quotes: LazyFrame) -> LazyFrame:
     quotes = quotes.filter(pl.col("type").ne("FT")).select(
         "time", "symbol", "bid_price", "ask_price", "bid_size", "condition"
     )
@@ -56,3 +58,8 @@ def generate_mbm(quotes: LazyFrame) -> LazyFrame:
     )
 
     return quotes
+
+
+@polars_generate
+def generate_mbm(quotes: LazyFrame) -> LazyFrame:
+    return _generate_mbm(quotes)
