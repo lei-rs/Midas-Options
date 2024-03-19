@@ -14,6 +14,12 @@ from .turning import generate_turning
 from .helpers import polars_generate
 
 
+PROC_FN = {
+    "turning": polars_generate(generate_turning),
+    "mbm": polars_generate(generate_mbm),
+}
+
+
 def save_result(df: pandas.DataFrame | pl.DataFrame, path_in: str, path_out: str):
     path_in = path_in.split("/")
     date = path_in[-3]
@@ -35,29 +41,14 @@ def save_result(df: pandas.DataFrame | pl.DataFrame, path_in: str, path_out: str
         raise ValueError(f"Invalid dataframe type: {type(df)}")
 
 
-def par_generate(fn):
-    def par_fn(lock, path_in: str, path_out: str):
-        try:
-            df = fn(path_in)
-            with lock:
-                save_result(df, path_in, path_out)
+def par_fn(fn, lock, path_in: str, path_out: str):
+    try:
+        df = fn(path_in)
+        with lock:
+            save_result(df, path_in, path_out)
 
-        except Exception as e:
-            return e
-
-    return par_fn
-
-
-PROC_FN = {
-    "turning": polars_generate(generate_turning),
-    "mbm": polars_generate(generate_mbm),
-}
-
-PROC_FN += {
-    "turning_mp": par_generate(PROC_FN["turning"]),
-    "mbm_mp": par_generate(PROC_FN["mbm"]),
-}
-
+    except Exception as e:
+        return e
 
 def iter_raw(in_dir: str):
     in_dir = Path(in_dir)
@@ -78,15 +69,16 @@ def do_generate(in_dir: str, out_dir: str, kind: str, workers: int = None):
     if not len(raw_files):
         raise FileNotFoundError(f"No files to process in {in_dir}")
 
+    fn = PROC_FN[kind]
     if workers and workers > 1:
-        fn = PROC_FN[kind + "_mp"]
         context = get_context("spawn")
         pool = ProcessPoolExecutor(max_workers=workers, mp_context=context)
         m = Manager()
         lock = m.Lock()
         for result in tqdm(
             pool.map(
-                fn,
+                par_fn,
+                repeat(fn, len(raw_files)),
                 repeat(lock, len(raw_files)),
                 raw_files,
                 repeat(out_dir, len(raw_files)),
@@ -96,7 +88,6 @@ def do_generate(in_dir: str, out_dir: str, kind: str, workers: int = None):
             if result:
                 raise result
     else:
-        fn = PROC_FN[kind]
         for file in tqdm(raw_files):
             df = fn(str(file))
             save_result(df, str(file), out_dir)
