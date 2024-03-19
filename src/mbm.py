@@ -1,7 +1,7 @@
 import polars as pl
 from polars import LazyFrame
 
-from .helpers import polars_generate
+from .helpers import prep_quotes
 
 
 def _add_floor_rows(quotes: LazyFrame) -> LazyFrame:
@@ -60,6 +60,7 @@ def _generate_mbm(quotes: LazyFrame) -> LazyFrame:
     return quotes
 
 
-@polars_generate
-def generate_mbm(quotes: LazyFrame) -> LazyFrame:
-    return _generate_mbm(quotes)
+def generate_mbm(in_path: str) -> pl.DataFrame:
+    df = pl.scan_parquet(in_path)
+    df = prep_quotes(df)
+    return _generate_mbm(df).collect()

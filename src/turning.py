@@ -1,7 +1,8 @@
 import polars as pl
+from pandas import DataFrame
 from polars import LazyFrame
 
-from .helpers import polars_generate
+from .helpers import prep_quotes
 
 
 def _generate_turning(df: LazyFrame) -> LazyFrame:
@@ -26,6 +27,8 @@ def _generate_turning(df: LazyFrame) -> LazyFrame:
     return df
 
 
-@polars_generate
-def generate_turning(df: LazyFrame) -> LazyFrame:
-    return _generate_turning(df)
+def generate_turning(in_path: str) -> DataFrame:
+    df = pl.scan_parquet(in_path)
+    df = prep_quotes(df)
+    return _generate_turning(df).collect()
+
