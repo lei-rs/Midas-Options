@@ -13,27 +13,6 @@ from .mbm import generate_mbm
 from .turning import generate_turning
 from .helpers import polars_generate
 
-PROC_FN = {
-    "turning": polars_generate(generate_turning),
-    "mbm": polars_generate(generate_mbm),
-}
-
-
-class _LocalFunctions:
-    @classmethod
-    def add_functions(cls, *args):
-        for function in args:
-            setattr(cls, function.__name__, function)
-            function.__qualname__ = cls.__qualname__ + "." + function.__name__
-
-
-def iter_raw(in_dir: str):
-    in_dir = Path(in_dir)
-    for date in os.listdir(in_dir):
-        for under in os.listdir(in_dir / date):
-            for file in os.listdir(in_dir / date / under):
-                yield str(in_dir / date / under / file)
-
 
 def save_result(df: pandas.DataFrame | pl.DataFrame, path_in: str, path_out: str):
     path_in = path_in.split("/")
@@ -56,6 +35,38 @@ def save_result(df: pandas.DataFrame | pl.DataFrame, path_in: str, path_out: str
         raise ValueError(f"Invalid dataframe type: {type(df)}")
 
 
+def par_generate(fn):
+    def par_fn(lock, path_in: str, path_out: str):
+        try:
+            df = fn(path_in)
+            with lock:
+                save_result(df, path_in, path_out)
+
+        except Exception as e:
+            return e
+
+    return par_fn
+
+
+PROC_FN = {
+    "turning": polars_generate(generate_turning),
+    "mbm": polars_generate(generate_mbm),
+}
+
+PROC_FN += {
+    "turning_mp": par_generate(PROC_FN["turning"]),
+    "mbm_mp": par_generate(PROC_FN["mbm"]),
+}
+
+
+def iter_raw(in_dir: str):
+    in_dir = Path(in_dir)
+    for date in os.listdir(in_dir):
+        for under in os.listdir(in_dir / date):
+            for file in os.listdir(in_dir / date / under):
+                yield str(in_dir / date / under / file)
+
+
 def do_generate(in_dir: str, out_dir: str, kind: str, workers: int = None):
     if not os.path.exists(in_dir):
         raise FileNotFoundError(f"Directory {in_dir} does not exist")
@@ -67,27 +78,15 @@ def do_generate(in_dir: str, out_dir: str, kind: str, workers: int = None):
     if not len(raw_files):
         raise FileNotFoundError(f"No files to process in {in_dir}")
 
-    fn = PROC_FN[kind]
     if workers and workers > 1:
-
-        def par_fn(lock, path_in: str, path_out: str):
-            try:
-                df = fn(path_in)
-                with lock:
-                    save_result(df, path_in, path_out)
-
-            except Exception as e:
-                return e
-
-        _LocalFunctions.add_functions(par_fn)
-
+        fn = PROC_FN[kind + "_mp"]
         context = get_context("spawn")
         pool = ProcessPoolExecutor(max_workers=workers, mp_context=context)
         m = Manager()
         lock = m.Lock()
         for result in tqdm(
             pool.map(
-                par_fn,
+                fn,
                 repeat(lock, len(raw_files)),
                 raw_files,
                 repeat(out_dir, len(raw_files)),
@@ -97,6 +96,7 @@ def do_generate(in_dir: str, out_dir: str, kind: str, workers: int = None):
             if result:
                 raise result
     else:
+        fn = PROC_FN[kind]
         for file in tqdm(raw_files):
             df = fn(str(file))
             save_result(df, str(file), out_dir)
