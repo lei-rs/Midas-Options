@@ -11,11 +11,13 @@ from tqdm import tqdm
 
 from .mbm import generate_mbm
 from .turning import generate_turning
+from .count import count_cc
 
 
 PROC_FN = {
     "turning": generate_turning,
     "mbm": generate_mbm,
+    "count": count_cc,
 }
 
 
