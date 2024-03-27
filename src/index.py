@@ -125,25 +125,26 @@ class IndexGenerator:
         return [None] * 15
 
     def generate_trade(self, ind, new_ind, tx_price, start, indicator, fin=None):
-        quotes = {
-            "q1": self.quotes_ar[new_ind],
-            "q2": self.find_q2(new_ind),
-            "q4": self.find_q4(new_ind),
-            "q5": self.find_q5(new_ind),
-        }
-
+        q1 = self.quotes_ar[new_ind]
         q3, q6 = self.find_q3_q6(
             new_ind,
-            check_dir(tx_price, (float(quotes["q1"][7]) + float(quotes["q1"][11])) / 2),
+            check_dir(tx_price, (float(q1[7]) + float(q1[11])) / 2),
         )
-        quotes = {**quotes, "q3": q3, "q6": q6}
+        quotes = [
+            q1,
+            self.find_q2(new_ind),
+            q3,
+            self.find_q4(new_ind),
+            self.find_q5(new_ind),
+            q6,
+        ]
 
         for offset in (-3, -2, -1, 0, 1, 2):
             if 0 <= new_ind + offset < self.num_orders:
                 q = self.quotes_ar[ind + offset]
             else:
                 q = [None] * 15
-            quotes[f"q_t{str(offset)}"] = q
+            quotes.append(q)
 
         if fin is None:
             tx = self.trades[start][1:]
@@ -206,6 +207,20 @@ class IndexGenerator:
 
 class IndexTradeReport:
     def __init__(self):
+        self.quote_col_prefixes = [
+            "q1",
+            "q2",
+            "q3",
+            "q4",
+            "q5",
+            "q6",
+            "q_t-3",
+            "q_t-2",
+            "q_t-1",
+            "q_t-0",
+            "q_t+1",
+            "q_t+2",
+        ]
         self.quote_cols = [
             "bb",
             "bb_size",
@@ -224,14 +239,16 @@ class IndexTradeReport:
             "trade_code",
             "time_to_fill",
         ]
-        self.quote_data = dict()
+        self.quote_data = []
+        for _ in self.quote_col_prefixes:
+            self.quote_data.append([])
         self.trade_data = []
 
     def add_trade(self, tx, quotes, indicator):
-        midpoint = (quotes["q1"][7] + quotes["q1"][11]) / 2
+        midpoint = (quotes[0][7] + quotes[0][11]) / 2
 
-        t1 = quotes["q1"][1]
-        t2 = quotes["q3"][1]
+        t1 = quotes[0][1]
+        t2 = quotes[2][1]
 
         if t1 is None or t2 is None:
             dif = None
@@ -243,11 +260,9 @@ class IndexTradeReport:
                 ).total_seconds()
             )
 
-        for k, v in quotes.items():
-            if not k in self.quote_data:
-                self.quote_data[k] = []
-            self.quote_data[k].append(
-                [v[7], v[6], v[11], v[10], convert_time(v[1]), v[14]]
+        for i, q in enumerate(quotes):
+            self.quote_data[i].append(
+                [q[7], q[6], q[11], q[10], convert_time(q[1]), q[14]]
             )
 
         self.trade_data.append(
@@ -259,7 +274,7 @@ class IndexTradeReport:
             tuple(
                 [
                     np.asarray(d)
-                    for d in [self.trade_data] + list(self.quote_data.values())
+                    for d in [self.trade_data] + self.quote_data
                 ]
             )
         )
@@ -268,7 +283,7 @@ class IndexTradeReport:
             columns=self.trade_cols
             + [
                 f"{prefix}_{col}"
-                for prefix in self.quote_data.keys()
+                for prefix in self.quote_col_prefixes
                 for col in self.quote_cols
             ],
         )
