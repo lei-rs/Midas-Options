@@ -9,6 +9,7 @@ import pandas
 import polars as pl
 from tqdm import tqdm
 
+from .index import generate_index_report
 from .mbm import generate_mbm
 from .turning import generate_turning
 from .count import count_cc
@@ -18,6 +19,7 @@ PROC_FN = {
     "turning": generate_turning,
     "mbm": generate_mbm,
     "count": count_cc,
+    "index": generate_index_report,
 }
 
 

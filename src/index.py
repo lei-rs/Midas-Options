@@ -125,27 +125,34 @@ class IndexGenerator:
         return [None] * 15
 
     def generate_trade(self, ind, new_ind, tx_price, start, indicator, fin=None):
-        q1 = self.quotes_ar[new_ind]
-        q2 = self.find_q2(new_ind)
-        q3, q6 = self.find_q3_q6(
-            new_ind, check_dir(tx_price, (float(q1[7]) + float(q1[11])) / 2)
-        )
-        q4 = self.find_q4(new_ind)
-        q5 = self.find_q5(new_ind)
-        q7 = [None] * 15
-        q8 = self.quotes_ar[ind]
+        quotes = {
+            "q1": self.quotes_ar[new_ind],
+            "q2": self.find_q2(new_ind),
+            "q4": self.find_q4(new_ind),
+            "q5": self.find_q5(new_ind),
+        }
 
-        if ind - 1 >= 0:
-            q7 = self.quotes_ar[ind - 1]
+        q3, q6 = self.find_q3_q6(
+            new_ind,
+            check_dir(tx_price, (float(quotes["q1"][7]) + float(quotes["q1"][11])) / 2),
+        )
+        quotes = {**quotes, "q3": q3, "q6": q6}
+
+        for offset in (-3, -2, -1, 0, 1, 2):
+            if 0 <= new_ind + offset < self.num_orders:
+                q = self.quotes_ar[ind + offset]
+            else:
+                q = [None] * 15
+            quotes[f"q_t{str(offset)}"] = q
 
         if fin is None:
             tx = self.trades[start][1:]
-            self.tr.add_trade(tx, [q1, q2, q3, q4, q5, q6, q7, q8], indicator)
+            self.tr.add_trade(tx, quotes, indicator)
 
         else:
             for i in range(start, fin):
                 tx = self.trades[i][1:]
-                self.tr.add_trade(tx, [q1, q2, q3, q4, q5, q6, q7, q8], indicator)
+                self.tr.add_trade(tx, quotes, indicator)
 
     def generate_tr(self):
         i = 0
@@ -194,23 +201,20 @@ class IndexGenerator:
                 self.generate_trade(curr_ind - i - 1, new_ind, tx_price, i, indicator)
                 i += 1
 
-        return pd.DataFrame(self.tr.trade_report, columns=self.tr.header)
+        return self.tr.finalize()
 
 
 class IndexTradeReport:
     def __init__(self):
-        quotes = [
-            [
-                f"q{i}_bb",
-                f"q{i}_bb_size",
-                f"q{i}_bo",
-                f"q{i}_bo_size",
-                f"q{i}_quote_ts",
-                f"q{i}_quote_condition",
-            ]
-            for i in range(1, 9)
+        self.quote_cols = [
+            "bb",
+            "bb_size",
+            "bo",
+            "bo_size",
+            "quote_ts",
+            "quote_condition",
         ]
-        self.header = [
+        self.trade_cols = [
             "option",
             "indicator",
             "trade_time",
@@ -218,37 +222,57 @@ class IndexTradeReport:
             "trade_price",
             "midpoint",
             "trade_code",
+            "time_to_fill",
         ]
-        self.header += [item for sublist in quotes for item in sublist]
-        self.header.insert(25, "time_to_fill")
-        self.trade_report = None
-        self.flag = True
+        self.quote_data = dict()
+        self.trade_data = []
 
     def add_trade(self, tx, quotes, indicator):
-        midpoint = (quotes[0][7] + quotes[0][11]) / 2
-        ts = [convert_time(x[1]) for x in [tx] + quotes]
+        midpoint = (quotes["q1"][7] + quotes["q1"][11]) / 2
 
-        if quotes[0][1] is None or quotes[2][1] is None:
+        t1 = quotes["q1"][1]
+        t2 = quotes["q3"][1]
+
+        if t1 is None or t2 is None:
             dif = None
         else:
             dif = str(
                 (
-                    dt.datetime.strptime(ts[1], "%H:%M:%S.%f")
-                    - dt.datetime.strptime(ts[3], "%H:%M:%S.%f")
+                    dt.datetime.strptime(convert_time(t1), "%H:%M:%S.%f")
+                    - dt.datetime.strptime(convert_time(t2), "%H:%M:%S.%f")
                 ).total_seconds()
             )
 
-        quotes = [
-            [q[7], q[6], q[11], q[10], ts[i + 1], q[14]] for i, q in enumerate(quotes)
-        ]
-        row = [tx[5], indicator, ts[0], tx[7], tx[8], midpoint, tx[12]]
-        row += [item for sublist in quotes for item in sublist]
-        row.insert(25, dif)
+        for k, v in quotes.items():
+            if not k in self.quote_data:
+                self.quote_data[k] = []
+            self.quote_data[k].append(
+                [v[7], v[6], v[11], v[10], convert_time(v[1]), v[14]]
+            )
 
-        if self.flag:
-            self.trade_report = np.array([row])
-            self.flag = False
-        else:
-            self.trade_report = np.vstack((self.trade_report, row))
+        self.trade_data.append(
+            [tx[5], indicator, convert_time(tx[1]), tx[7], tx[8], midpoint, tx[12], dif]
+        )
 
-        return
+    def finalize(self):
+        array = np.hstack(
+            tuple(
+                [
+                    np.asarray(d)
+                    for d in [self.trade_data] + list(self.quote_data.values())
+                ]
+            )
+        )
+        return pd.DataFrame(
+            array,
+            columns=self.trade_cols
+            + [
+                f"{prefix}_{col}"
+                for prefix in self.quote_data.keys()
+                for col in self.quote_cols
+            ],
+        )
+
+
+def generate_index_report(in_path: str) -> pd.DataFrame:
+    return IndexGenerator(pd.read_parquet(in_path)).generate_tr()
