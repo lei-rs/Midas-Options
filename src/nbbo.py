@@ -1,46 +1,44 @@
 from datetime import timedelta
-from typing import Set, Optional, Dict
+from typing import Set, Optional, Dict, Tuple, Any, List
 
 import polars as pl
 from polars import DataFrame, Series, LazyFrame
+from collections import deque
+from tqdm import tqdm
 
 
-def _pivot_and_fill(quotes: LazyFrame) -> LazyFrame:
-    """
-    Pivot the quotes table by exchange and fill nulls
-    :param quotes:
-    :return:
-    """
-    quotes = (
-        (
-            quotes.collect()
-            .pivot(
-                values=["bid_size", "bid_price", "ask_size", "ask_price", "condition"],
-                index="time",
-                columns="exchange",
-                aggregate_function="last",
-            )
-            .lazy()
-            .select(pl.all().forward_fill())
-        )
+def _pivot_and_fill(quotes: DataFrame) -> LazyFrame:
+    quotes = quotes.select(
+        [
+            "time",
+            "seq",
+            "bid_size",
+            "bid_price",
+            "ask_size",
+            "ask_price",
+            "exchange",
+        ]
+    ).pivot(
+        ["bid_size", "bid_price", "ask_size", "ask_price"],
+        "seq",
+        "exchange",
+    )
+    return (
+        quotes.lazy()
+        .select(pl.all().forward_fill())
         .with_columns(
             [
-                pl.col("^(bid_size|ask_size).*$").fill_null(0),
-                pl.col("^condition.*$").fill_null("K"),
+                pl.col("^bid_price.*$").fill_null(0),
+                pl.col("^ask_price.*$").fill_null(float("inf")),
             ]
         )
-        .filter(pl.all_horizontal(pl.col("^(bid_size|ask_size).*$") != 0))
+        .select(sorted(quotes.columns))
     )
-    return quotes.select(sorted(quotes.columns))
 
 
-def generate_nbbo(quotes: LazyFrame) -> LazyFrame:
-    """
-    Generate NBBO indicators for each exchange
-    :param quotes:
-    :return:
-    """
-    quotes = quotes.filter(pl.col("type") == "F@")
+def generate_nbbo(quotes: DataFrame) -> LazyFrame:
+    quotes = quotes.filter(pl.col("type") == "F@", pl.col("ask_price") != 0)
+    #time = quotes.select("time").to_series()
 
     # Pivot and fill nulls
     quotes = _pivot_and_fill(quotes)
@@ -57,84 +55,156 @@ def generate_nbbo(quotes: LazyFrame) -> LazyFrame:
     # Calculate NBBO indicators
     quotes = quotes.with_columns(
         [
-            pl.when(pl.col("^bid_price.*$") == pl.col("nbb"))
-            .then(1)
-            .otherwise(0)
-            .name.map(lambda c: f"{c[-1]}_nbb_ind"),
-            pl.when(pl.col("^ask_price.*$") == pl.col("nbo"))
-            .then(1)
-            .otherwise(0)
-            .name.map(lambda c: f"{c[-1]}_nbo_ind"),
+            pl.concat_str(
+                pl.when(pl.col("^bid_price.*$") == pl.col("nbb")).then(1).otherwise(0)
+            ).alias("nbb_ex"),
+            pl.concat_str(
+                pl.when(pl.col("^ask_price.*$") == pl.col("nbo")).then(1).otherwise(0)
+            ).alias("nbo_ex"),
         ]
     )
 
+    # Select final columns
     quotes = quotes.select(
         [
-            pl.col("time"),
+            pl.col("seq").shift(-1),
             pl.col("nbb"),
             pl.col("nbo"),
-            pl.col("^condition.*$"),
-            pl.col("^.*_nbb_ind$"),
-            pl.col("^.*_nbo_ind$"),
+            pl.col("nbb_ex"),
+            pl.col("nbo_ex"),
         ]
     )
 
     return quotes
 
 
-def _get_directions(trades: DataFrame, raw: DataFrame) -> Series:
-    """
-    Get the direction of each trade
-    :param trades:
-    :param raw:
-    :return:
-    """
-    fq_idxs = (trades[:, "index"] - 1).to_list()
-    trade_price = trades[:, "bid_price"]
-    bids = raw[fq_idxs, "bid_price"]
-    asks = raw[fq_idxs, "ask_price"]
-    return pl.select(
-        pl.when(trade_price == bids)
-        .then(pl.lit("b"))
-        .when(trade_price == asks)
-        .then(pl.lit("a"))
-    ).to_series()
+class EquityReport:
+    def __init__(self, df: LazyFrame):
+        df = (
+            df.filter(
+                pl.col("type").eq("F@")
+                | (
+                    pl.col("type").eq("FT")
+                    & pl.col("condition").is_in({"I", "S", "a", "j"})
+                )
+            )
+        ).collect()
+        self.df = df.lazy().sort("exchange", "seq").with_row_index().collect()
+        self.nbbo = generate_nbbo(df).with_columns(pl.col("seq").shift(-1)).collect()
+        self.def_i = len(self.df)
 
+    def check_trade(self, trade_i: int):
+        t_price = self.df.item(trade_i, "bid_price")
+        t_size = self.df.item(trade_i, "bid_size")
+        t_ex = self.df.item(trade_i, "exchange")
 
-def _find_q1(df: DataFrame, tidx: int) -> int:
-    ex = df.item(tidx, "exchange")
-    if ex in {"N"}:
-        return tidx - 1
-
-
-def _find_q5(df: DataFrame, q1_idx: int, direction: str) -> None | int:
-    """
-    Finds quote type 5. The first quote posted for a given trade.
-    :param df:
-    :param q1_idx: The index of the quote corresponding to the trade.
-    :param direction: The direction of the trade.
-    :return:
-    """
-    q5 = q1_idx
-    first = df[q5]
-    for i in range(-1, q5, -1):
-        curr = df[i]
-        if curr["type"] == "FT":
-            continue
-        elif (
-            direction == "a"
-            and first["ask_price", "condition"] == curr["ask_price", "condition"]
-        ) or (
-            direction == "b"
-            and first["bid_price", "condition"] == curr["bid_price", "condition"]
+        if (
+            self.df.item(trade_i - 1, "type") == "FT"
+            or self.df.item(trade_i + 1, "type") == "FT"
+            or self.df.item(trade_i - 1, "exchange") != t_ex
+            or self.df.item(trade_i + 1, "exchange") != t_ex
         ):
-            q5 = i
-        else:
-            break
+            return False
 
-    if df.item(q5, "type") == "FT":
+        bs1, bp1, as1, ap1 = self.df.row(trade_i - 1)[5:9]
+        bs2, bp2, as2, ap2 = self.df.row(trade_i + 1)[5:9]
+        return (
+            (t_price == bp1 == bp2 and bs2 + t_size == bs1)
+            or (t_price == ap1 == ap2 and as2 + t_size == as1)
+            or (t_price != bp2 and (t_size, t_price) == (bs1, bp1))
+            or (t_price != ap2 and (t_size, t_price) == (as1, ap1))
+        )
+
+    def find_q1(self, trade_i: int):
+        trade_ex = self.df.item(trade_i, "exchange")
+        limit = 1
+        if trade_ex in {"C", "E", "W", "Z"}:
+            limit = 2
+        elif trade_ex in {"H", "I", "J", "Q", "T", "X"} and not self.check_trade(
+            trade_i
+        ):
+            return None
+        quotes_found = 0
+
+        for i in range(trade_i - 1, -1, -1):
+            if self.df.item(i, "exchange") != trade_ex:
+                return None
+            if self.df.item(i, "type") == "FT":
+                continue
+            quotes_found += 1
+            if quotes_found == limit:
+                return i
         return None
-    return q5 - 1
+
+    def find_q5(self, trade_i: int, q1_i: int):
+        trade_price = self.df.item(trade_i, "bid_price")
+        bid_price = self.df.item(q1_i, "bid_price")
+        ask_price = self.df.item(q1_i, "ask_price")
+
+        if trade_price == bid_price:
+            side = "b"
+        elif trade_price == ask_price:
+            side = "a"
+        else:
+            return self.def_i, self.def_i
+
+        q5_i = q1_i
+        prev = self.df.row(q5_i)
+        for i in range(q5_i - 1, -1, -1):
+            curr = self.df.row(i)
+            if curr[9] != prev[9]:
+                return -1, -1
+            if curr[1] == "FT":
+                continue
+            if (
+                curr[10] != prev[10]
+                or (side == "b" and (curr[6] != prev[6]))
+                or (side == "a" and (curr[8] != prev[8]))
+            ):
+                return i, prev[0]
+            else:
+                prev = curr
+        return self.def_i, self.def_i
+
+    def generate(self) -> DataFrame:
+        before_q5 = []
+        q5 = []
+        for trade_i in (
+            self.df.filter(pl.col("type").eq("FT")).select("index").to_series()
+        ):
+            q1_i = self.find_q1(trade_i)
+            if q1_i is None:
+                before_q5.append(self.def_i)
+                q5.append(self.def_i)
+                continue
+            temp = self.find_q5(trade_i, q1_i)
+            before_q5.append(temp[0])
+            q5.append(temp[1])
+
+        self.df.vstack(pl.DataFrame({c: None for c in self.df.columns}), in_place=True)
+
+        trades = (
+            self.df.lazy()
+            .select(["type", "time", "bid_size", "bid_price", "exchange"])
+            .filter(pl.col("type").eq("FT"))
+            .drop("type")
+            .collect()
+        )
+        trades.columns = ["trade_time", "trade_size", "trade_price", "exchange"]
+
+        q5 = self.df.select(
+            ["seq", "time", "bid_size", "bid_price", "ask_size", "ask_price"]
+        )[q5, :]
+        q5 = (
+            q5.lazy().join(self.nbbo.lazy(), on="seq", how="left").drop("seq").collect()
+        )
+        q5.columns = [f"q5_{c}" for c in q5.columns]
+
+        before_q5 = self.df.select(["time", "bid_size", "bid_price", "ask_size", "ask_price"])[before_q5, :]
+        before_q5.columns = [f"before_q5_{c}" for c in before_q5.columns]
+
+        final = pl.concat([trades, q5, before_q5], how="horizontal")
+        return final
 
 
 def _se_analyze_ex(ex: DataFrame, nbbo: DataFrame) -> DataFrame:
@@ -189,48 +259,3 @@ def analyze_executions(raw: LazyFrame, subset: Optional[Set] = None) -> Dict:
     by_ex = raw.collect().partition_by("exchange", as_dict=True)
     by_ex = {k: _se_analyze_ex(v, nbbo) for k, v in by_ex.items()}
     return by_ex
-
-
-def time_at_nbbo(quotes: pl.DataFrame):
-    quotes = quotes.with_columns(
-        pl.date(1970, 1, 1).dt.combine(pl.col("c2")).alias("c2")
-    )
-    rng = pl.date_range(
-        quotes.select(pl.first("c2").dt.truncate("1m")).item(),
-        quotes.select(pl.last("c2").dt.truncate("1m")).item() + timedelta(minutes=1),
-        "1m",
-        eager=True,
-    )[1:]
-    rng = rng.filter(~rng.is_in(quotes["c2"]))
-    times = pl.DataFrame({"c2": rng})
-    quotes = pl.concat([quotes.lazy(), times.lazy()], how="diagonal").sort("c2")
-    quotes = quotes.select(pl.all().forward_fill())
-
-    frac_nbbo = quotes.select(
-        [
-            pl.col("c2").diff().shift(-1).dt.epoch().alias("diff"),
-            pl.col("c2").dt.truncate(timedelta(minutes=1)).alias("floor"),
-            pl.col("^.*_nbb_ind$"),
-            pl.col("^.*_nbo_ind$"),
-        ]
-    )
-
-    frac_nbbo = frac_nbbo.with_columns(
-        [
-            pl.col("^.*_nbb_ind$").mul(pl.col("diff")),
-            pl.col("^.*_nbo_ind$").mul(pl.col("diff")),
-        ]
-    )
-
-    frac_nbbo = (
-        frac_nbbo.groupby("floor")
-        .agg(
-            [
-                pl.col("^.*_nbb_ind$").sum() / 60000000,
-                pl.col("^.*_nbo_ind$").sum() / 60000000,
-            ]
-        )
-        .collect()
-    )
-
-    return frac_nbbo

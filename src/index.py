@@ -139,8 +139,8 @@ class IndexGenerator:
             q6,
         ]
 
-        for offset in (-3, -2, -1, 0, 1, 2):
-            if 0 <= new_ind + offset < self.num_orders:
+        for offset in (3, 2, 1, 0, -1, -2):
+            if 0 <= ind + offset < self.num_orders:
                 q = self.quotes_ar[ind + offset]
             else:
                 q = [None] * 15
@@ -217,7 +217,7 @@ class IndexTradeReport:
             "q_t-3",
             "q_t-2",
             "q_t-1",
-            "q_t-0",
+            "q_t0",
             "q_t+1",
             "q_t+2",
         ]
@@ -271,12 +271,7 @@ class IndexTradeReport:
 
     def finalize(self):
         array = np.hstack(
-            tuple(
-                [
-                    np.asarray(d)
-                    for d in [self.trade_data] + self.quote_data
-                ]
-            )
+            tuple([np.asarray(d) for d in [self.trade_data] + self.quote_data])
         )
         return pd.DataFrame(
             array,

@@ -31,4 +31,3 @@ def generate_turning(in_path: str) -> DataFrame:
     df = pl.scan_parquet(in_path)
     df = prep_quotes(df)
     return _generate_turning(df).collect()
-

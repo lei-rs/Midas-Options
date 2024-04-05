@@ -58,15 +58,6 @@ def cast_trades(df: pl.DataFrame):
     )
 
 
-def polars_generate(fn: Callable[[LazyFrame], LazyFrame]):
-    def polars_fn(path_in: str):
-        df = pl.scan_parquet(path_in)
-        df = prep_quotes(df)
-        return fn(df).collect()
-
-    return polars_fn
-
-
 def prep_quotes(df: LazyFrame) -> LazyFrame:
     swap_exprs = [
         pl.when(pl.col("c1") == "FT").then(new).otherwise(old).alias(old)
@@ -84,6 +75,7 @@ def prep_quotes(df: LazyFrame) -> LazyFrame:
     df = df.select(
         "c1",
         "c2",
+        "c3",
         "c6",
         "c7",
         "c8",
@@ -96,6 +88,7 @@ def prep_quotes(df: LazyFrame) -> LazyFrame:
         {
             "c1": "type",
             "c2": "time",
+            "c3": "seq",
             "c6": "symbol",
             "c7": "bid_size",
             "c8": "bid_price",
@@ -109,7 +102,9 @@ def prep_quotes(df: LazyFrame) -> LazyFrame:
     # Cast types
     df = df.with_columns(
         [
-            pl.from_epoch(pl.col("time").str.to_integer(), time_unit="us"),
+            # pl.from_epoch(pl.col("time"), time_unit="us"),
+            pl.col("time").cast(pl.UInt64),
+            pl.col("seq").cast(pl.UInt32),
             pl.col("bid_size").cast(pl.Float32).round(0).cast(pl.UInt16),
             pl.col("bid_price").cast(pl.Float32).round(2),
             pl.col("ask_size").cast(pl.Float32).round(0).cast(pl.UInt16),

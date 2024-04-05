@@ -6,8 +6,7 @@ def count_cc(path: str) -> DataFrame:
     df = pl.read_parquet(path)
     symbol = df.item(0, "c6")
     df = (
-        df
-        .select("c1", "c15")
+        df.select("c1", "c15")
         .filter(pl.col("c1") == "F@")
         .groupby("c15")
         .agg(pl.count())
