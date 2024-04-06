@@ -10,7 +10,6 @@ from tqdm import tqdm
 def _pivot_and_fill(quotes: DataFrame) -> LazyFrame:
     quotes = quotes.select(
         [
-            "time",
             "seq",
             "bid_size",
             "bid_price",
@@ -37,8 +36,9 @@ def _pivot_and_fill(quotes: DataFrame) -> LazyFrame:
 
 
 def generate_nbbo(quotes: DataFrame) -> LazyFrame:
-    quotes = quotes.filter(pl.col("type") == "F@", pl.col("ask_price") != 0)
-    #time = quotes.select("time").to_series()
+    quotes = quotes.filter(pl.col("type") == "F@").with_columns(
+        pl.when(pl.col("ask_price") == 0.).then(float("inf")).otherwise(pl.col("ask_price")).alias("ask_price"),
+    )
 
     # Pivot and fill nulls
     quotes = _pivot_and_fill(quotes)
@@ -67,7 +67,8 @@ def generate_nbbo(quotes: DataFrame) -> LazyFrame:
     # Select final columns
     quotes = quotes.select(
         [
-            pl.col("seq").shift(-1),
+            pl.col("seq"),
+            pl.col("seq").shift(-1).alias("lead_seq"),
             pl.col("nbb"),
             pl.col("nbo"),
             pl.col("nbb_ex"),
@@ -116,14 +117,12 @@ class EquityReport:
         )
 
     def find_q1(self, trade_i: int):
+        trade_price = self.df.item(trade_i, "bid_price")
         trade_ex = self.df.item(trade_i, "exchange")
+        nasdaq = {"H", "I", "J", "Q", "T", "X"}
         limit = 1
-        if trade_ex in {"C", "E", "W", "Z"}:
+        if trade_ex in {"C", "E", "W", "Z"}.union(nasdaq):
             limit = 2
-        elif trade_ex in {"H", "I", "J", "Q", "T", "X"} and not self.check_trade(
-            trade_i
-        ):
-            return None
         quotes_found = 0
 
         for i in range(trade_i - 1, -1, -1):
@@ -132,6 +131,13 @@ class EquityReport:
             if self.df.item(i, "type") == "FT":
                 continue
             quotes_found += 1
+            """
+            if trade_ex in nasdaq:
+                bid_price = self.df.item(i, "bid_price")
+                ask_price = self.df.item(i, "ask_price")
+                if trade_price == bid_price or trade_price == ask_price:
+                    return i
+            """
             if quotes_found == limit:
                 return i
         return None
@@ -140,6 +146,11 @@ class EquityReport:
         trade_price = self.df.item(trade_i, "bid_price")
         bid_price = self.df.item(q1_i, "bid_price")
         ask_price = self.df.item(q1_i, "ask_price")
+        first_cond = self.df.item(q1_i, "condition")
+        if first_cond == "A":
+            expected_cond = {"A"}
+        else:
+            expected_cond = {"C", first_cond}
 
         if trade_price == bid_price:
             side = "b"
@@ -157,7 +168,7 @@ class EquityReport:
             if curr[1] == "FT":
                 continue
             if (
-                curr[10] != prev[10]
+                curr[10] not in expected_cond
                 or (side == "b" and (curr[6] != prev[6]))
                 or (side == "a" and (curr[8] != prev[8]))
             ):
