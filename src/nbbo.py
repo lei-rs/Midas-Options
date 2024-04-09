@@ -1,10 +1,7 @@
-from datetime import timedelta
-from typing import Set, Optional, Dict, Tuple, Any, List
+from typing import Set, Optional, Dict
 
 import polars as pl
-from polars import DataFrame, Series, LazyFrame
-from collections import deque
-from tqdm import tqdm
+from polars import DataFrame, LazyFrame
 
 
 def _pivot_and_fill(quotes: DataFrame) -> LazyFrame:
@@ -67,8 +64,7 @@ def generate_nbbo(quotes: DataFrame) -> LazyFrame:
     # Select final columns
     quotes = quotes.select(
         [
-            pl.col("seq"),
-            pl.col("seq").shift(-1).alias("lead_seq"),
+            pl.col("seq").shift(-1),
             pl.col("nbb"),
             pl.col("nbo"),
             pl.col("nbb_ex"),
@@ -177,9 +173,38 @@ class EquityReport:
                 prev = curr
         return self.def_i, self.def_i
 
+    def others(self, q_i: int):
+        ret = []
+        ex = self.df.item(q_i, "exchange")
+
+        for i in range(q_i - 1, -1, -1):
+            if self.df.item(i, "exchange") != ex:
+                break
+            if self.df.item(i, "type") == "F@":
+                ret.append(i)
+            if len(ret) == 5:
+                break
+        if len(ret) < 5:
+            ret.extend([self.def_i] * (5 - len(ret)))
+        ret = ret[::-1]
+
+        for i in range(q_i + 1, len(self.df)):
+            if self.df.item(i, "exchange") != ex:
+                break
+            if self.df.item(i, "type") == "F@":
+                ret.append(i)
+            if len(ret) == 9:
+                break
+        if len(ret) < 9:
+            ret.extend([self.def_i] * (9 - len(ret)))
+
+        return ret
+
     def generate(self) -> DataFrame:
         before_q5 = []
         q5 = []
+        others = [[] for _ in range(9)]
+
         for trade_i in (
             self.df.filter(pl.col("type").eq("FT")).select("index").to_series()
         ):
@@ -187,34 +212,48 @@ class EquityReport:
             if q1_i is None:
                 before_q5.append(self.def_i)
                 q5.append(self.def_i)
+                for l in others:
+                    l.append(self.def_i)
                 continue
             temp = self.find_q5(trade_i, q1_i)
             before_q5.append(temp[0])
             q5.append(temp[1])
+            for i, j in enumerate(self.others(q1_i)):
+                others[i].append(j)
 
         self.df.vstack(pl.DataFrame({c: None for c in self.df.columns}), in_place=True)
 
         trades = (
             self.df.lazy()
-            .select(["type", "time", "bid_size", "bid_price", "exchange"])
+            .select(["type", "time", "bid_size", "bid_price", "exchange", "condition"])
             .filter(pl.col("type").eq("FT"))
             .drop("type")
             .collect()
         )
-        trades.columns = ["trade_time", "trade_size", "trade_price", "exchange"]
+        trades.columns = [f"trade_{c}" for c in trades.columns]
 
         q5 = self.df.select(
-            ["seq", "time", "bid_size", "bid_price", "ask_size", "ask_price"]
+            ["seq", "time", "bid_size", "bid_price", "ask_size", "ask_price", "condition"]
         )[q5, :]
         q5 = (
             q5.lazy().join(self.nbbo.lazy(), on="seq", how="left").drop("seq").collect()
         )
         q5.columns = [f"q5_{c}" for c in q5.columns]
 
-        before_q5 = self.df.select(["time", "bid_size", "bid_price", "ask_size", "ask_price"])[before_q5, :]
+        before_q5 = self.df.select(["time", "bid_size", "bid_price", "ask_size", "ask_price",
+                                    "condition"
+                                    ])[before_q5, :]
         before_q5.columns = [f"before_q5_{c}" for c in before_q5.columns]
 
-        final = pl.concat([trades, q5, before_q5], how="horizontal")
+        quotes = [trades, q5, before_q5]
+        for offset, l in zip([-5, -4, -3, -2, -1, "+1", "+2", "+3", "+4"], others):
+            temp = self.df.select(
+                ["time", "bid_size", "bid_price", "ask_size", "ask_price", "condition"]
+            )[l, :]
+            temp.columns = [f"q_t{offset}_{c}" for c in temp.columns]
+            quotes.append(temp)
+
+        final = pl.concat(quotes, how="horizontal")
         return final
 
 
