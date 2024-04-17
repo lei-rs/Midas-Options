@@ -93,7 +93,7 @@ class SplitProducts:
             twxm = twxm_byte.decode("utf-8").split(" ")
             product = twxm[5].replace("_", "")
 
-            if self.whitelist and product in self.whitelist:
+            if self.whitelist is None or product in self.whitelist:
                 self._save_data(product, twxm)
                 self.products[product].check()
 
@@ -112,7 +112,7 @@ def download(date_range: str, workers: int = None):
     except ValueError:
         raise ValueError("Invalid date range format")
 
-    args = zip([SYMBOL] * len(dates), dates)
+    args = list(zip([SYMBOL] * len(dates), dates))
     if workers:
         executor = ProcessPoolExecutor(max_workers=workers)
         results = []
