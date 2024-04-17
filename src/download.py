@@ -73,10 +73,12 @@ class SplitProducts:
         self._twxm = twxm
         self.products = {}
         self.date = date
-        with_trades = list(pd.read_csv(SKIP_DIR.format(date))["symbol"])
-        self.with_trades = set(
-            [s.replace("_", "").replace(" ", "") for s in with_trades]
-        )
+        self.whitelist = None
+        if SKIP_DIR:
+            whitelist = list(pd.read_csv(SKIP_DIR.format(date))["symbol"])
+            self.whitelist = set(
+                [s.replace("_", "").replace(" ", "") for s in whitelist]
+            )
 
     def _save_data(self, product: str, row: str):
         if product in self.products:
@@ -91,7 +93,7 @@ class SplitProducts:
             twxm = twxm_byte.decode("utf-8").split(" ")
             product = twxm[5].replace("_", "")
 
-            if product in self.with_trades:
+            if self.whitelist and product in self.whitelist:
                 self._save_data(product, twxm)
                 self.products[product].check()
 
