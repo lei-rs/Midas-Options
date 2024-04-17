@@ -1,19 +1,17 @@
-from concurrent.futures import ProcessPoolExecutor
-from typing import List, Tuple
-
-import fcntl
-from tqdm import tqdm
-from io import StringIO
-import pandas as pd
-import subprocess
+import argparse
 import os
+import subprocess
+from concurrent.futures import ProcessPoolExecutor
 
-from .index import IndexGenerator
+import pandas as pd
+from tqdm import tqdm
+
+from .helpers import get_trading_days
 
 CHUNK = 10000
-DATA_DIR = None
-SYMBOL_DIR = None
+SYMBOL = None
 OUT_DIR = None
+SKIP_DIR = None
 
 
 class ProcReader:
@@ -57,8 +55,8 @@ class Product:
     def _write(self):
         df = pd.DataFrame(self.data, columns=[f"c{i}" for i in range(1, 16)])
         symbol = self.data[0][5].split("_")[0]
-        os.makedirs(f"{DATA_DIR}/{self.date}/{symbol}/", exist_ok=True)
-        path = f"{DATA_DIR}/{self.date}/{symbol}/{self.product}.parquet.gzip"
+        os.makedirs(f"{OUT_DIR}/{self.date}/{symbol}/", exist_ok=True)
+        path = f"{OUT_DIR}/{self.date}/{symbol}/{self.product}.parquet.gzip"
 
         if not os.path.isfile(path):
             df.to_parquet(path, index=None, engine="fastparquet", compression="gzip")
@@ -71,11 +69,11 @@ class Product:
 
 
 class SplitProducts:
-    def __init__(self, twxm, date):
+    def __init__(self, twxm: ProcReader, date):
         self._twxm = twxm
         self.products = {}
         self.date = date
-        with_trades = list(pd.read_csv(SYMBOL_DIR.format(date))["symbol"])
+        with_trades = list(pd.read_csv(SKIP_DIR.format(date))["symbol"])
         self.with_trades = set(
             [s.replace("_", "").replace(" ", "") for s in with_trades]
         )
@@ -101,34 +99,57 @@ class SplitProducts:
             v.write()
 
 
-def download(symbol, date):
+def worker(symbol: str, date: str):
     twxm = ProcReader(f"twxm {date} opra {symbol}_*")
     SplitProducts(twxm, date).execute()
 
 
-def index_worker(symbol, date, file_name):
-    df = pd.read_parquet(f"{DATA_DIR}/{date}/{symbol}/{file_name}")
-    params = {"index": False, "float_format": "%.3f", "header": False}
-    generator = IndexGenerator(df)
-    csv_buffer = StringIO()
-    tr = generator.generate_tr()
-    os.makedirs(f"{OUT_DIR}/{date}/", exist_ok=True)
+def download(date_range: str, workers: int = None):
+    try:
+        dates = get_trading_days(*date_range.split("-"))
+    except ValueError:
+        raise ValueError("Invalid date range format")
 
-    with open(f"{OUT_DIR}/{date}/tr_{symbol}.csv", "a") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        tr.to_csv(f, **params)
-        fcntl.flock(f, fcntl.LOCK_UN)
+    executor = ProcessPoolExecutor(max_workers=workers)
+    results = []
+    for args in zip([SYMBOL] * len(dates), dates):
+        results.append(executor.submit(worker, *args))
+    for res in tqdm(results):
+        print(res.result())
+    executor.shutdown(wait=True)
 
 
-class MPApply:
-    def __init__(self, args: List[Tuple]):
-        self.args = args
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(prog="Midas Downloader")
+    parser.add_argument(
+        "output_dir",
+        type=str,
+        help="Directory to store the downloaded data",
+    )
+    parser.add_argument(
+        "symbol",
+        type=str,
+        help="Underlying to download",
+    )
+    parser.add_argument(
+        "date_range",
+        type=str,
+        help="Date range to download"
+             "Format: YYYYMMDD-YYYYMMDD",
+    )
+    parser.add_argument(
+        "--skip",
+        type=str,
+        help="Skip dates in the format YYYYMMDD,YYYYMMDD",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        help="Number of workers to use",
+    )
+    args = parser.parse_args()
 
-    def apply(self, func, total_procs):
-        executor = ProcessPoolExecutor(max_workers=total_procs)
-        results = []
-        for args in self.args:
-            results.append(executor.submit(func, *args))
-        for res in tqdm(results):
-            print(res.result())
-        executor.shutdown(wait=True)
+    SYMBOL = args.symbol
+    OUT_DIR = args.output_dir
+    SKIP_DIR = args.skip
+    download(args.date_range)

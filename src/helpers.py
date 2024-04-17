@@ -22,7 +22,7 @@ def convert_time(block_time: str):
     return str(time.time()) + "." + block_time[5:]
 
 
-def get_trading_days(date_start, date_end):
+def get_trading_days(date_start: str, date_end: str):
     date_start = dt.datetime.strptime(date_start, "%Y%m%d")
     date_end = dt.datetime.strptime(date_end, "%Y%m%d")
 
