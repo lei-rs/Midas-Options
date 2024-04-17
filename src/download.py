@@ -112,13 +112,18 @@ def download(date_range: str, workers: int = None):
     except ValueError:
         raise ValueError("Invalid date range format")
 
-    executor = ProcessPoolExecutor(max_workers=workers)
-    results = []
-    for args in zip([SYMBOL] * len(dates), dates):
-        results.append(executor.submit(worker, *args))
-    for res in tqdm(results):
-        print(res.result())
-    executor.shutdown(wait=True)
+    args = zip([SYMBOL] * len(dates), dates)
+    if workers:
+        executor = ProcessPoolExecutor(max_workers=workers)
+        results = []
+        for arg in args:
+            results.append(executor.submit(worker, *arg))
+        for res in tqdm(results):
+            print(res.result())
+        executor.shutdown(wait=True)
+    else:
+        for arg in tqdm(args):
+            worker(*arg)
 
 
 if __name__ == "__main__":
