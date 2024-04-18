@@ -11,7 +11,7 @@ from .helpers import get_trading_days
 CHUNK = 10000
 SYMBOL = None
 OUT_DIR = None
-SKIP_DIR = None
+WHITELIST = None
 
 
 class ProcReader:
@@ -74,8 +74,8 @@ class SplitProducts:
         self.products = {}
         self.date = date
         self.whitelist = None
-        if SKIP_DIR:
-            whitelist = list(pd.read_csv(SKIP_DIR.format(date))["symbol"])
+        if WHITELIST:
+            whitelist = list(pd.read_csv(WHITELIST.format(date))["symbol"])
             self.whitelist = set(
                 [s.replace("_", "").replace(" ", "") for s in whitelist]
             )
@@ -145,7 +145,7 @@ if __name__ == "__main__":
              "Format: YYYYMMDD-YYYYMMDD",
     )
     parser.add_argument(
-        "--skip",
+        "--whitelist",
         type=str,
         help="Skip dates in the format YYYYMMDD,YYYYMMDD",
     )
@@ -158,5 +158,5 @@ if __name__ == "__main__":
 
     SYMBOL = args.symbol
     OUT_DIR = args.output_dir
-    SKIP_DIR = args.skip
+    WHITELIST = args.whitelist
     download(args.date_range)

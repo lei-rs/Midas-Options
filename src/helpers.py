@@ -1,8 +1,7 @@
 import datetime as dt
-from typing import Callable
 
 import polars as pl
-from polars import DataFrame, LazyFrame
+from polars import LazyFrame
 
 
 def check_dir(tx_price, midpoint):
@@ -34,28 +33,6 @@ def get_trading_days(date_start: str, date_end: str):
         date_start += dt.timedelta(days=1)
 
     return result
-
-
-def cast_quotes(df: pl.DataFrame):
-    return df.with_columns(
-        [
-            pl.from_epoch(pl.col("c2"), time_unit="us"),
-            pl.col("c7").cast(pl.UInt16, strict=False),
-            pl.col("c8").cast(pl.Float32, strict=False).round(2),
-            pl.col("c11").cast(pl.UInt16, strict=False),
-            pl.col("c12").cast(pl.Float32, strict=False).round(2),
-        ]
-    )
-
-
-def cast_trades(df: pl.DataFrame):
-    return df.with_columns(
-        [
-            pl.from_epoch(pl.col("c2"), time_unit="us"),
-            pl.col("c8").cast(pl.UInt16, strict=False),
-            pl.col("c9").cast(pl.Float32, strict=False).round(2),
-        ]
-    )
 
 
 def prep_quotes(df: LazyFrame) -> LazyFrame:
