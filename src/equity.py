@@ -1,7 +1,7 @@
 import polars as pl
 from polars import DataFrame, LazyFrame
 
-from src.helpers import prep_quotes
+from .helpers import prep_quotes
 
 
 def generate_equity_report(in_path: str) -> DataFrame:
