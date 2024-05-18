@@ -1,6 +1,14 @@
 import polars as pl
 from polars import DataFrame, LazyFrame
 
+from src.helpers import prep_quotes
+
+
+def generate_equity_report(in_path: str) -> DataFrame:
+    df = pl.scan_csv(in_path)
+    df = prep_quotes(df)
+    return EquityReport(df).generate()
+
 
 def _pivot_and_fill(quotes: DataFrame) -> LazyFrame:
     quotes = quotes.select(
