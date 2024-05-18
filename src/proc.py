@@ -13,6 +13,7 @@ from .index import generate_index_report
 from .mbm import generate_mbm
 from .turning import generate_turning
 from .count import count_cc
+from .equity import generate_equity_report
 
 
 PROC_FN = {
@@ -20,6 +21,7 @@ PROC_FN = {
     "mbm": generate_mbm,
     "count": count_cc,
     "index": generate_index_report,
+    "equity": generate_equity_report,
 }
 
 
